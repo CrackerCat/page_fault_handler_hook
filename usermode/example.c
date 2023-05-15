@@ -10,10 +10,13 @@ void fun2() {
 
 
 int main(void) {
+    printf("main addr: %llx\n", main);
+    printf("fun1 addr: %llx\n", fun1);
+
     while (1) {
         int a = 1, b = 2;
         printf("fun1(%i, %i): %i\n", a, b, fun1(a, b));
-        printf("fun1 @ %llx: ", fun1);
+        printf("fun1 disas: ");
         for (int i = 0; i < (long) fun2 - (long) fun1; i++) {
             printf("%hhx ", ((char *) fun1)[i]);
         }

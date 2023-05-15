@@ -3,6 +3,7 @@
 #include <linux/kernel.h>
 #include <linux/ptrace.h>
 #include <linux/signal.h>
+#include <linux/smp.h>
 #include <linux/sched/signal.h>
 #include <asm/traps.h>
 #include <asm/tlbflush.h>
@@ -25,6 +26,11 @@ module_param_named(pid, hooked_pid, int, 0644);
 static pte_t *hooked_ptep;
 struct vm_area_struct *hooked_vma;
 static struct task_struct *hooked_task;
+
+void flush_all(void) {
+    on_each_cpu((void (*)(void *)) __flush_tlb_all, NULL, 1);
+    on_each_cpu((void (*)(void *)) wbinvd, NULL, 1);
+}
 
 static pte_t *virt_to_pte(struct task_struct *task, unsigned long addr) {
     struct mm_struct *mm = task->mm;
@@ -77,18 +83,16 @@ asmlinkage vm_fault_t hooked_handle_pte_fault(struct vm_fault *vmf) {
     if (current == hooked_task && pte_offset_map(vmf->pmd, vmf->address) == hooked_ptep && !(vmf->flags & FAULT_FLAG_REMOTE)) {
         vmf->pte = pte_offset_map(vmf->pmd, vmf->address);
 
-        printk(KERN_INFO "[swap]: handle_pte_fault ip @ %llx, vmf->address @ %llx", task_pt_regs(current)->ip, vmf->real_address);
-
         // if (vmf->flags & FAULT_FLAG_INSTRUCTION) {
         if (vmf->real_address == task_pt_regs(current)->ip) {
-            printk(KERN_INFO "[swap]: handle_pte_fault called on hooked page during ins fetch\n");
+            printk(KERN_INFO "[swap]: handle_pte_fault INS FETCH ip @ %llx, vmf->real_address @ %llx", task_pt_regs(current)->ip, vmf->real_address);
         }
         else {
-            printk(KERN_INFO "[swap]: handle_pte_fault called on hooked page during read\n");
+            printk(KERN_INFO "[swap]: handle_pte_fault READ ip @ %llx, vmf->real_address @ %llx", task_pt_regs(current)->ip, vmf->real_address);
         }
 
         set_pte(vmf->pte, pte_set_flags(*vmf->pte, _PAGE_PRESENT));
-        __flush_tlb_all();
+        flush_all();
 
         user_enable_single_step_(current);
 
@@ -101,12 +105,12 @@ asmlinkage vm_fault_t hooked_handle_pte_fault(struct vm_fault *vmf) {
 
 void hooked_arch_do_signal_or_restart(struct pt_regs *regs) {
     if (current == hooked_task) {
-        printk(KERN_INFO "[swap]: arch_do_signal_or_restart called on task @ %llx\n", hooked_task);
-
-        user_disable_single_step_(current);
+        // printk(KERN_INFO "[swap]: arch_do_signal_or_restart called on task @ %llx\n", hooked_task);
 
         set_pte(hooked_ptep, pte_clear_flags(*hooked_ptep, _PAGE_PRESENT));
-        __flush_tlb_all();
+        flush_all();
+
+        user_disable_single_step_(current);
 
         sigdelset(&current->pending.signal, SIGTRAP);
         recalc_sigpending();
@@ -136,7 +140,7 @@ static int __init swap_driver_init(void) {
     hooked_vma = vma_lookup(hooked_task->mm, hooked_addr);
 
     set_pte(hooked_ptep, pte_clear_flags(*hooked_ptep, _PAGE_PRESENT));
-    __flush_tlb_all();
+    flush_all();
 
     int err;
     err = fh_install_hooks(hooks, ARRAY_SIZE(hooks));
@@ -150,7 +154,8 @@ static int __init swap_driver_init(void) {
 static void __exit swap_driver_exit(void) {
     fh_remove_hooks(hooks, ARRAY_SIZE(hooks));
 
-    // set_pte(hooked_ptep, pte_set_flags(*hooked_ptep, _PAGE_PRESENT));
+    set_pte(hooked_ptep, pte_set_flags(*hooked_ptep, _PAGE_PRESENT));
+    flush_all();
 
     printk(KERN_INFO "[swap]: module unloaded\n");
 }
