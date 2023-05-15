@@ -1,0 +1,9 @@
+hook handle_pte_fault
+hook do_trap
+
+1. mark hooked page as not present
+2. on fault, in handle_pte_fault hook check if hooked page, if hooked page, check access type\
+    - access type: ins fetch: swap physical address to new phys, mark as present
+    - access type: read: swap physical address to orig phys, mark as present
+3. set trap flag on process and resume
+4. in do_trap hook, mark hooked page as not present
